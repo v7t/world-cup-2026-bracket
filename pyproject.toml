@@ -1,0 +1,13 @@
+[project]
+name = "worldcup2026"
+version = "0.1.0"
+description = "Circular knockout bracket for the FIFA World Cup 2026"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "matplotlib>=3.11.0",
+    "numpy>=2.5.0",
+    "pillow>=12.0.0",
+    "resvg-py>=0.3.3",
+    "selenium>=4.45.0",
+]
