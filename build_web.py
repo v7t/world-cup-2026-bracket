@@ -63,9 +63,9 @@ RADII = [1.00, 0.82, 0.64, 0.46, 0.28, 0.0]
 # semi-finals, so they never share a node and the graph is unaffected.
 KNOCKOUT_ROUNDS = ("Round of 32", "Round of 16", "Quarter-final", "Semi-final",
                    "Match for third place", "Final")
-ROUND_ABBR = {"Round of 32": "R32", "Round of 16": "R16",
-              "Quarter-final": "QF", "Semi-final": "SF",
-              "Match for third place": "THIRD PLACE", "Final": "FINAL"}
+ROUND_LABEL = {"Round of 32": "Round of 32", "Round of 16": "Round of 16",
+               "Quarter-final": "Quarter Finals", "Semi-final": "Semi Finals",
+               "Match for third place": "Third Place", "Final": "Final"}
 
 CODE_BY_NAME = {name.lower(): code for name, code, _ in TEAMS}
 CODE_BY_NAME.update({
@@ -186,7 +186,7 @@ def collect_matches():
         if not a or not b or wi is None:
             continue                      # undecided, or a "W73"-style placeholder
         rows.append({
-            "round": ROUND_ABBR.get(rnd, rnd),
+            "round": ROUND_LABEL.get(rnd, rnd),
             "date": m.get("date", ""),
             "a": a, "b": b,
             "winner": (a, b)[wi],
