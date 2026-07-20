@@ -58,9 +58,14 @@ TEAMS = [
 assert len(TEAMS) == 32
 
 RADII = [1.00, 0.82, 0.64, 0.46, 0.28, 0.0]
-KNOCKOUT_ROUNDS = ("Round of 32", "Round of 16", "Quarter-final", "Semi-final", "Final")
+# The third-place play-off is listed in the results panel for completeness even
+# though it has no node on the bracket: its two teams both lost their
+# semi-finals, so they never share a node and the graph is unaffected.
+KNOCKOUT_ROUNDS = ("Round of 32", "Round of 16", "Quarter-final", "Semi-final",
+                   "Match for third place", "Final")
 ROUND_ABBR = {"Round of 32": "R32", "Round of 16": "R16",
-              "Quarter-final": "QF", "Semi-final": "SF", "Final": "FINAL"}
+              "Quarter-final": "QF", "Semi-final": "SF",
+              "Match for third place": "THIRD PLACE", "Final": "FINAL"}
 
 CODE_BY_NAME = {name.lower(): code for name, code, _ in TEAMS}
 CODE_BY_NAME.update({
@@ -77,6 +82,17 @@ CODE_BY_NAME.update({
 # Each flag/crest is an OffsetImage of  native_px * zoom * (dpi/72)  display
 # pixels; convert that through the axes transform to get data units.
 FLAG_PX, FLAG_ZOOM, CREST_ZOOM = 240, 0.155, 0.190
+
+# Champion badge: the winner's flag sits over the trophy on the centre logo,
+# matching the beaten finalist's flag exactly -- same size, and level with it
+# on the horizontal centre line (the finalist node sits at y = 0).
+CHAMP_ZOOM = FLAG_ZOOM  # same size as every other flag
+CHAMP_FLAG_Y = 0.0      # same height as the losing finalist
+CHAMP_TEXT_Y = -0.215   # label sits clear of the logo's lower edge
+CHAMP_SUB_DY = -0.052   # subtitle offset below the nation's name
+CHAMP_NAME_FS = 16      # nation: large and bold   (matplotlib points)
+CHAMP_SUB_FS = 9        # subtitle: small, regular weight
+CHAMP_SUBTITLE = "World Cup Champions"
 
 
 def layout_sizes():
@@ -99,7 +115,7 @@ def layout_sizes():
     sizes = {
         "flagD": to_data(FLAG_PX * FLAG_ZOOM * dpi_cor),
         "crestD": to_data(260 * CREST_ZOOM * dpi_cor),
-        "champD": to_data(FLAG_PX * FLAG_ZOOM * 1.35 * dpi_cor),
+        "champD": to_data(FLAG_PX * CHAMP_ZOOM * dpi_cor),
         "logoW": to_data(800 * 0.11 * dpi_cor),
         "logoH": to_data(logo_native_h * 0.11 * dpi_cor),
     }
@@ -208,6 +224,10 @@ def build_payload():
 
     payload = {
         "canvas": 1600, "view": 1.6, "fs": 15,
+        "champFlagY": CHAMP_FLAG_Y, "champTextY": CHAMP_TEXT_Y,
+        "champSubDy": CHAMP_SUB_DY, "champSubtitle": CHAMP_SUBTITLE,
+        # matplotlib point sizes -> SVG user units (team names: 9 pt drawn at fs 15)
+        "champNameFs": CHAMP_NAME_FS * 15 / 9, "champSubFs": CHAMP_SUB_FS * 15 / 9,
         "radii": RADII,
         "startAngleDeg": 90 - (360 / len(TEAMS)) / 2,
         "angleStepDeg": 360 / len(TEAMS),
@@ -457,18 +477,25 @@ function dynSvg(t) {
   }
   for (const f of t.flags) s += flagUse(f.x, f.y, f.code, D.flagD, t.eliminated.has(f.code));
 
+  // the logo always holds the centre; the champion's flag is laid over the cup
+  const [ox, oy] = toPx(-D.logoW / 2, D.logoH / 2);
+  s += `<image x="${ox.toFixed(2)}" y="${oy.toFixed(2)}" width="${(D.logoW * S).toFixed(2)}"
+    height="${(D.logoH * S).toFixed(2)}" preserveAspectRatio="xMidYMid meet" href="${D.logo}"/>`;
+
   if (t.champion) {
-    const [cx, cy] = toPx(0, 0), gr = D.champD * S / 2 + 10;
-    s += `<circle cx="${cx}" cy="${cy}" r="${gr.toFixed(2)}" fill="${C.gold}" stroke="#8a6d1f" stroke-width="4"/>`;
-    s += flagUse(0, 0, t.champion, D.champD, false);
-    const [tx, ty] = toPx(0, -0.17);
-    s += `<text x="${tx}" y="${ty}" text-anchor="middle" dominant-baseline="hanging"
-      font-size="18" fill="${C.gold}" font-weight="bold"
-      font-family="Segoe UI, system-ui, sans-serif">CHAMPION</text>`;
-  } else {
-    const [ox, oy] = toPx(-D.logoW / 2, D.logoH / 2);
-    s += `<image x="${ox.toFixed(2)}" y="${oy.toFixed(2)}" width="${(D.logoW * S).toFixed(2)}"
-      height="${(D.logoH * S).toFixed(2)}" preserveAspectRatio="xMidYMid meet" href="${D.logo}"/>`;
+    const [cx, cy] = toPx(0, D.champFlagY), gr = D.champD * S / 2 * 1.16;
+    s += `<circle cx="${cx.toFixed(2)}" cy="${cy.toFixed(2)}" r="${gr.toFixed(2)}"
+      fill="${C.gold}" stroke="#8a6d1f" stroke-width="3"/>`;
+    s += flagUse(0, D.champFlagY, t.champion, D.champD, false);
+    const [tx, ty] = toPx(0, D.champTextY);
+    s += `<text x="${tx.toFixed(1)}" y="${ty.toFixed(1)}" text-anchor="middle"
+      dominant-baseline="hanging" font-size="${D.champNameFs.toFixed(1)}"
+      fill="${C.gold}" font-weight="bold"
+      font-family="Segoe UI, system-ui, sans-serif">${NAME[t.champion].toUpperCase()}</text>`;
+    const [sx, sy] = toPx(0, D.champTextY + D.champSubDy);
+    s += `<text x="${sx.toFixed(1)}" y="${sy.toFixed(1)}" text-anchor="middle"
+      dominant-baseline="hanging" font-size="${D.champSubFs.toFixed(1)}"
+      fill="${C.gold}" font-family="Segoe UI, system-ui, sans-serif">${D.champSubtitle}</text>`;
   }
   return s;
 }

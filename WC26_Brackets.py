@@ -443,6 +443,19 @@ FLAG_PX = 240           # base raster size for every flag
 FLAG_ZOOM = 0.155       # one flag size, shared by outer ring and inner rings
 CREST_ZOOM = 0.190      # federation crests, a touch larger than the flags
 
+# Champion badge: the winner's flag sits over the trophy on the centre logo,
+# matching the beaten finalist's flag exactly -- same size, and level with it
+# on the horizontal centre line (the finalist node sits at y = 0).
+CHAMP_ZOOM = FLAG_ZOOM  # same size as every other flag
+CHAMP_FLAG_Y = 0.0      # same height as the losing finalist
+CHAMP_TEXT_Y = -0.235   # label sits clear of the logo's lower edge
+CHAMP_SUB_DY = -0.052   # subtitle offset below the nation's name
+CHAMP_NAME_FS = 18      # nation: large and bold
+CHAMP_SUB_FS = 12        # subtitle: small and regular weight
+CHAMP_SUBTITLE = "World Cup Champions"
+
+_NAME_BY_CODE = {code: name for name, code, _ in teams}
+
 for i, (name, code, acronym) in enumerate(teams):
     theta = leaf_angles[i]
     x, y = polar_to_xy(RADII[0], theta)
@@ -479,24 +492,24 @@ for wx, wy, code, rnd in winner_flags:
     ax.add_artist(AnnotationBbox(OffsetImage(adv_im, zoom=FLAG_ZOOM),
                                  (wx, wy), frameon=False, zorder=5, pad=0))
 
+# The tournament logo always holds the centre.  Once the final is decided the
+# champion's flag is laid over the trophy, with the winning nation named below.
+logo_im = load_svg_image(LOGO_PATH, 800)
+ax.add_artist(AnnotationBbox(OffsetImage(logo_im, zoom=0.11), (0, 0),
+                             frameon=False, zorder=6, pad=0))
+
 if champion_code:
-    # champion flag on the centre, ringed in gold
-    ax.scatter([0], [0], s=4200, marker="o", color=GOLD,
-               edgecolor="#8a6d1f", linewidth=2, zorder=5.5)
+    champ_name = _NAME_BY_CODE.get(champion_code, champion_code).replace("\n", " ")
     champ_im = circular_image(os.path.join(FLAG_DIR, f"{champion_code}.png"), FLAG_PX)
-    ax.add_artist(AnnotationBbox(OffsetImage(champ_im, zoom=FLAG_ZOOM * 1.35),
-                                 (0, 0), frameon=False, zorder=6, pad=0))
-    ax.text(0, -0.17, "CHAMPION", ha="center", va="top",
-            fontsize=11, color=GOLD, fontweight="bold", zorder=6)
-else:
-    # official tournament logo in the centre, over an invisible (background-
-    # coloured) backing so the centre connector lines don't show through the
-    # logo's transparent areas
-    # ax.add_patch(Ellipse((0, 0), width=0.42, height=0.62, facecolor=BG,
-    #                     edgecolor="none", zorder=5.9))
-    logo_im = load_svg_image(LOGO_PATH, 800)
-    ax.add_artist(AnnotationBbox(OffsetImage(logo_im, zoom=0.11), (0, 0),
-                                    frameon=False, zorder=6, pad=0))
+    # gold halo, then the flag over the cup
+    ax.scatter([0], [CHAMP_FLAG_Y], s=(FLAG_PX * CHAMP_ZOOM * 1.16) ** 2, marker="o",
+               color=GOLD, edgecolor="#8a6d1f", linewidth=2, zorder=6.5)
+    ax.add_artist(AnnotationBbox(OffsetImage(champ_im, zoom=CHAMP_ZOOM),
+                                 (0, CHAMP_FLAG_Y), frameon=False, zorder=7, pad=0))
+    ax.text(0, CHAMP_TEXT_Y, champ_name.upper(), ha="center", va="top",
+            fontsize=CHAMP_NAME_FS, color=GOLD, fontweight="bold", zorder=7)
+    ax.text(0, CHAMP_TEXT_Y + CHAMP_SUB_DY, CHAMP_SUBTITLE, ha="center", va="top",
+            fontsize=CHAMP_SUB_FS, color=GOLD, zorder=7)
 
 ax.set_xlim(-1.6, 1.6)
 ax.set_ylim(-1.6, 1.6)
@@ -540,7 +553,7 @@ def _disp_len_to_data(px):
 
 FLAG_D = _disp_len_to_data(FLAG_PX * FLAG_ZOOM * _DPI_COR)          # flag diameter
 CREST_D = _disp_len_to_data(260 * CREST_ZOOM * _DPI_COR)           # crest box (load_logo_image size=260)
-CHAMP_D = _disp_len_to_data(FLAG_PX * FLAG_ZOOM * 1.35 * _DPI_COR)  # champion flag
+CHAMP_D = _disp_len_to_data(FLAG_PX * CHAMP_ZOOM * _DPI_COR)       # champion flag
 
 
 def _to_px(x, y):
@@ -685,27 +698,37 @@ for wx, wy, code, rnd in winner_flags:
     parts.append(_flag_image(wx, wy, code, FLAG_D,
                              grey=GREY_ELIMINATED and code in eliminated))
 
-# centre: champion flag (with gold ring) or the tournament logo
+# centre: the tournament logo always, with the champion's flag laid over the
+# cup (and the winning nation named) once the final is decided
+logo_uri = _data_uri(LOGO_PATH)
+# match matplotlib: logo_im is 'logo_im.size' px, drawn at zoom 0.11
+logo_w = _disp_len_to_data(logo_im.size[0] * 0.11 * _DPI_COR)
+logo_h = _disp_len_to_data(logo_im.size[1] * 0.11 * _DPI_COR)
+ox, oy = _to_px(-logo_w / 2, logo_h / 2)
+parts.append(f'<image x="{ox:.2f}" y="{oy:.2f}" width="{logo_w * S:.2f}" '
+             f'height="{logo_h * S:.2f}" preserveAspectRatio="xMidYMid meet" '
+             f'xlink:href="{logo_uri}"/>')
+
 if champion_code:
-    cpx, cpy = _to_px(0, 0)
-    gold_r = CHAMP_D * S / 2 + 10
+    cpx, cpy = _to_px(0, CHAMP_FLAG_Y)
+    gold_r = CHAMP_D * S / 2 * 1.16
     parts.append(f'<circle cx="{cpx:.2f}" cy="{cpy:.2f}" r="{gold_r:.2f}" '
-                 f'fill="{GOLD}" stroke="#8a6d1f" stroke-width="4"/>')
-    parts.append(_flag_image(0, 0, champion_code, CHAMP_D))
-    ctx, cty = _to_px(0, -0.17)
+                 f'fill="{GOLD}" stroke="#8a6d1f" stroke-width="3"/>')
+    parts.append(_flag_image(0, CHAMP_FLAG_Y, champion_code, CHAMP_D))
+    champ_name = _NAME_BY_CODE.get(champion_code, champion_code).replace("\n", " ")
+    # matplotlib point sizes -> SVG user units (team names: 9 pt drawn at FS)
+    _pt = FS / 9.0
+    ctx, cty = _to_px(0, CHAMP_TEXT_Y)
     parts.append(f'<text x="{ctx:.1f}" y="{cty:.1f}" text-anchor="middle" '
-                 f'dominant-baseline="hanging" font-size="18" fill="{GOLD}" '
-                 f'font-weight="bold" font-family="DejaVu Sans, Arial, sans-serif">'
-                 f'CHAMPION</text>')
-else:
-    logo_uri = _data_uri(LOGO_PATH)
-    # match matplotlib: logo_im is 'logo_im.size' px, drawn at zoom 0.11
-    logo_w = _disp_len_to_data(logo_im.size[0] * 0.11 * _DPI_COR)
-    logo_h = _disp_len_to_data(logo_im.size[1] * 0.11 * _DPI_COR)
-    ox, oy = _to_px(-logo_w / 2, logo_h / 2)
-    parts.append(f'<image x="{ox:.2f}" y="{oy:.2f}" width="{logo_w * S:.2f}" '
-                 f'height="{logo_h * S:.2f}" preserveAspectRatio="xMidYMid meet" '
-                 f'xlink:href="{logo_uri}"/>')
+                 f'dominant-baseline="hanging" font-size="{CHAMP_NAME_FS * _pt:.1f}" '
+                 f'fill="{GOLD}" font-weight="bold" '
+                 f'font-family="DejaVu Sans, Arial, sans-serif">'
+                 f'{champ_name.upper()}</text>')
+    stx, sty = _to_px(0, CHAMP_TEXT_Y + CHAMP_SUB_DY)
+    parts.append(f'<text x="{stx:.1f}" y="{sty:.1f}" text-anchor="middle" '
+                 f'dominant-baseline="hanging" font-size="{CHAMP_SUB_FS * _pt:.1f}" '
+                 f'fill="{GOLD}" font-family="DejaVu Sans, Arial, sans-serif">'
+                 f'{CHAMP_SUBTITLE}</text>')
 
 parts.append('</svg>')
 
