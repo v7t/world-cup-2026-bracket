@@ -355,7 +355,6 @@ HTML = r"""<!doctype html>
   .side.lose { color: #7c7c7c; }
   .score { font-variant-numeric: tabular-nums; font-size: .76rem; color: #b9b9b9; text-align: right; }
   .date { font-size: .64rem; color: #6a6a6a; margin-top: .12rem; }
-  .row.selected { background: #20242c; border-color: #3f7bd6; }
 
   /* right-most column: match info, goals and the embedded highlights video */
   .details {
@@ -643,7 +642,7 @@ function buildResults() {
   });
   document.getElementById('results').innerHTML = html;
   document.querySelectorAll('.row').forEach(r =>
-    r.addEventListener('click', () => select(+r.dataset.i)));
+    r.addEventListener('click', () => setN(+r.dataset.i + 1)));
 }
 
 // Right-most column: info + video links for the selected match.
@@ -656,7 +655,7 @@ function vidLink(v, label) {
 function renderDetails(i) {
   const el = document.getElementById('details');
   if (i < 0 || i >= D.matches.length) {
-    el.innerHTML = `<div class="empty">Move the slider, or pick a match on the
+    el.innerHTML = `<div class="empty">Move the slider, or click a match on the
       left, to see the score, venue and highlights here.</div>`;
     return;
   }
@@ -706,16 +705,9 @@ function renderDetails(i) {
 const stage = document.getElementById('stage');
 const slider = document.getElementById('slider');
 const rows = () => document.querySelectorAll('.row');
-let selected = -1;
 
-// Select a match for the details column (independent of the slider position),
-// so an earlier game's highlights can be pulled up without rewinding the graph.
-function select(i) {
-  selected = i;
-  rows().forEach((r, k) => r.classList.toggle('selected', k === i));
-  renderDetails(i);
-}
-
+// Clicking a match sets the slider to it (setN), so the bracket advances to
+// that game and its details are shown -- the current game is one and the same.
 function setN(n) {
   n = Math.max(0, Math.min(D.matches.length, n));
   slider.value = n;
@@ -727,7 +719,7 @@ function setN(n) {
   });
   const cur = document.querySelector('.row.latest');
   if (cur) cur.scrollIntoView({ block: 'nearest' });
-  select(n - 1);          // details follow the most recently played match
+  renderDetails(n - 1);   // details follow the most recently played match
 }
 
 stage.innerHTML = staticSvg();
