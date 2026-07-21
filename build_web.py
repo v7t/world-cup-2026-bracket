@@ -31,6 +31,7 @@ FLAG_SVG_DIR = os.path.join(SCRIPT_DIR, "flags_svg")
 CREST_DIR = os.path.join(SCRIPT_DIR, "crests_svg")
 LOGO_PATH = os.path.join(SCRIPT_DIR, "2026_FIFA_World_Cup_logo.svg")
 WORLDCUP_PATH = os.path.join(SCRIPT_DIR, "worldcup.json")
+HIGHLIGHTS_PATH = os.path.join(SCRIPT_DIR, "worldcup_highlights.json")
 # Default output is docs/index.html: that is what GitHub Pages serves
 # (Settings -> Pages -> Deploy from a branch -> master -> /docs).
 OUT_PATH = os.path.join(SCRIPT_DIR, "docs", "index.html")
@@ -172,10 +173,55 @@ def score_text(score):
     return txt
 
 
+def load_highlights():
+    """match number -> {'highlights': {...}, 'extended': {...}} video links.
+
+    Optional: the page degrades gracefully to 'no video' if the file is absent.
+    Keyed on match_number, which lines up exactly with worldcup.json's 'num'.
+    """
+    if not os.path.exists(HIGHLIGHTS_PATH):
+        print("[warn] worldcup_highlights.json not found; no video links.")
+        return {}, ""
+    with open(HIGHLIGHTS_PATH, encoding="utf-8") as fh:
+        data = json.load(fh)
+    by_num = {}
+    for m in data.get("matches", []):
+        num = m.get("match_number")
+        if num is None:
+            continue
+        entry = {}
+        for src, dst in (("highlights", "hl"), ("extended_highlights", "ext")):
+            v = m.get(src)
+            if isinstance(v, dict) and v.get("url"):
+                vid = re.search(r"[?&]v=([\w-]+)", v["url"])
+                entry[dst] = {"title": v.get("title", ""), "url": v["url"],
+                              "id": vid.group(1) if vid else ""}
+        if entry:
+            by_num[num] = entry
+    return by_num, data.get("source_channel", "")
+
+
+def _goals(lst, code):
+    """Normalise a worldcup.json goals list for one team into render-ready rows."""
+    out = []
+    for g in lst or []:
+        out.append({"code": code, "name": g.get("name", ""),
+                    "min": str(g.get("minute", "")),
+                    "pen": bool(g.get("penalty")), "og": bool(g.get("owngoal"))})
+    return out
+
+
+def _minute_key(g):
+    """Sort key for a goal minute like '45', '90+2', '120+5'."""
+    m = re.match(r"(\d+)(?:\+(\d+))?", g["min"])
+    return (int(m.group(1)), int(m.group(2) or 0)) if m else (0, 0)
+
+
 def collect_matches():
-    """Decided knockout matches, in chronological order."""
+    """Decided knockout matches, in chronological order, with video links."""
     with open(WORLDCUP_PATH, encoding="utf-8") as fh:
         data = json.load(fh)
+    videos, _ = load_highlights()
     rows = []
     for m in data["matches"]:
         rnd = m.get("round")
@@ -185,13 +231,19 @@ def collect_matches():
         wi = winner_index(m.get("score"))
         if not a or not b or wi is None:
             continue                      # undecided, or a "W73"-style placeholder
+        num = m.get("num") or 0
+        goals = _goals(m.get("goals1"), a) + _goals(m.get("goals2"), b)
+        goals.sort(key=_minute_key)
         rows.append({
             "round": ROUND_LABEL.get(rnd, rnd),
             "date": m.get("date", ""),
             "a": a, "b": b,
             "winner": (a, b)[wi],
             "score": score_text(m.get("score")),
-            "num": m.get("num") or 0,
+            "num": num,
+            "ground": m.get("ground", ""),
+            "goals": goals,
+            "video": videos.get(num, {}),
         })
     rows.sort(key=lambda r: (r["date"], r["num"]))
     return rows
@@ -220,7 +272,9 @@ def build_payload():
             aspects[code] = svg_aspect(crest_path)
 
     matches = collect_matches()
-    print(f"Loaded {len(matches)} decided knockout match(es).")
+    _, source_channel = load_highlights()
+    n_vid = sum(1 for m in matches if m["video"])
+    print(f"Loaded {len(matches)} decided knockout match(es); {n_vid} with video.")
 
     payload = {
         "canvas": 1600, "view": 1.6, "fs": 15,
@@ -235,6 +289,7 @@ def build_payload():
                    "gold": "#e6c35c", "white": "#ffffff"},
         "teams": [{"name": n, "code": c, "acronym": a} for n, c, a in TEAMS],
         "matches": matches,
+        "sourceChannel": source_channel,
         "flags": flags, "crests": crests, "crestAspect": aspects,
         "logo": data_uri(LOGO_PATH),
     }
@@ -249,6 +304,10 @@ HTML = r"""<!doctype html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>FIFA World Cup 2026 — Knockout Bracket</title>
 <style>
+  /* Whole-page font scale: 175% of the 16px default -> 1rem = 28px.  Every
+     text size below is in rem, so it tracks this one knob.  (The bracket SVG
+     uses its own font sizes in user units and is unaffected.) */
+  :root { font-size: 175%; }
   * { box-sizing: border-box; }
   body {
     margin: 0; background: #0a0a0a; color: #f2f2f2; height: 100vh;
@@ -263,44 +322,108 @@ HTML = r"""<!doctype html>
   .stage svg { width: 100%; height: 100%; max-height: 100%; }
 
   .sidebar {
-    width: 330px; flex-shrink: 0; border-left: 1px solid #242424;
+    width: 380px; flex-shrink: 0; border-left: 1px solid #242424;
     display: flex; flex-direction: column; min-height: 0;
   }
-  .sidebar h2 {
-    margin: 0; padding: 14px 16px 10px; font-size: 13px; letter-spacing: .12em;
+  .sidebar h2, .details h2 {
+    margin: 0; padding: .5rem .6rem .38rem; font-size: .82rem; letter-spacing: .12em;
     text-transform: uppercase; color: #9a9a9a; border-bottom: 1px solid #242424;
   }
-  .results { overflow-y: auto; padding: 6px 8px 16px; flex: 1; }
+  /* scrollable, but with the scrollbar chrome hidden on both columns */
+  .results, .detail-body {
+    scrollbar-width: none;              /* Firefox */
+    -ms-overflow-style: none;           /* old Edge */
+  }
+  .results::-webkit-scrollbar, .detail-body::-webkit-scrollbar { width: 0; height: 0; }
+  .results { overflow-y: auto; padding: .25rem .3rem .6rem; flex: 1; }
   .rnd-head {
-    font-size: 11px; letter-spacing: .14em; color: #e6c35c; padding: 12px 8px 5px;
+    font-size: .7rem; letter-spacing: .14em; color: #e6c35c; padding: .5rem .3rem .2rem;
     text-transform: uppercase;
   }
   .row {
-    display: grid; grid-template-columns: 1fr auto; gap: 6px; align-items: center;
-    padding: 7px 8px; border-radius: 6px; cursor: pointer; margin-bottom: 2px;
+    display: grid; grid-template-columns: 1fr auto; gap: .25rem; align-items: center;
+    padding: .28rem .3rem; border-radius: 6px; cursor: pointer; margin-bottom: .08rem;
     border: 1px solid transparent;
   }
   .row:hover { background: #171717; }
   .row.future { opacity: .28; }
   .row.latest { background: #1c1c1c; border-color: #e6c35c; }
-  .side { display: flex; align-items: center; gap: 7px; font-size: 13px; line-height: 1.25; }
-  .side + .side { margin-top: 3px; }
-  .side img { width: 19px; height: 19px; border-radius: 50%; object-fit: cover; flex-shrink: 0; }
+  .side { display: flex; align-items: center; gap: .3rem; font-size: .82rem; line-height: 1.25; }
+  .side + .side { margin-top: .12rem; }
+  .side img { width: 1.2rem; height: 1.2rem; border-radius: 50%; object-fit: cover; flex-shrink: 0; }
   .side.win { font-weight: 600; color: #ffffff; }
   .side.lose { color: #7c7c7c; }
-  .score { font-variant-numeric: tabular-nums; font-size: 12px; color: #b9b9b9; text-align: right; }
-  .date { font-size: 10px; color: #6a6a6a; margin-top: 3px; }
+  .score { font-variant-numeric: tabular-nums; font-size: .76rem; color: #b9b9b9; text-align: right; }
+  .date { font-size: .64rem; color: #6a6a6a; margin-top: .12rem; }
+  .row.selected { background: #20242c; border-color: #3f7bd6; }
 
-  .footer { border-top: 1px solid #242424; padding: 12px 22px 16px; }
-  .ctrl { display: flex; align-items: center; gap: 16px; }
+  /* right-most column: match info, goals and the embedded highlights video */
+  .details {
+    width: 460px; flex-shrink: 0; border-left: 1px solid #242424;
+    display: flex; flex-direction: column; min-height: 0;
+  }
+  .detail-body { overflow-y: auto; padding: 1rem; flex: 1; }
+  .d-round {
+    font-size: .7rem; letter-spacing: .14em; text-transform: uppercase;
+    color: #e6c35c; margin-bottom: .6rem;
+  }
+  .d-team {
+    display: flex; align-items: center; gap: .5rem; font-size: 1rem; padding: .25rem 0;
+  }
+  .d-team img { width: 1.9rem; height: 1.9rem; border-radius: 50%; object-fit: cover; }
+  .d-team .nm { flex: 1; }
+  .d-team.win { font-weight: 700; color: #fff; }
+  .d-team.win .nm::after { content: " ✓"; color: #e6c35c; }
+  .d-team.lose { color: #8a8a8a; }
+  .d-team .gl { font-variant-numeric: tabular-nums; font-size: 1.15rem; }
+  .d-vs { font-size: .7rem; color: #6a6a6a; padding: .1rem 0 .1rem 2.4rem; }
+  .d-meta { font-size: .76rem; color: #8a8a8a; margin: .7rem 0 .2rem; line-height: 1.5; }
+  .d-meta b { color: #c8c8c8; font-weight: 600; }
+
+  .sec-h {
+    font-size: .64rem; letter-spacing: .12em; text-transform: uppercase;
+    color: #7a7a7a; margin: .9rem 0 .3rem;
+  }
+  .goals { display: flex; flex-direction: column; gap: .3rem; }
+  .goal { display: flex; align-items: center; gap: .45rem; font-size: .8rem; color: #d6d6d6; }
+  .goal img { width: 1.05rem; height: 1.05rem; border-radius: 50%; object-fit: cover; flex-shrink: 0; }
+  .goal .min { color: #e6c35c; font-variant-numeric: tabular-nums;
+    min-width: 2.6em; text-align: right; }
+  .goal .tag { color: #8a8a8a; font-size: .82em; }
+  .no-goals { font-size: .74rem; color: #7a7a7a; font-style: italic; }
+
+  .vids { margin-top: .55rem; display: flex; flex-direction: column; gap: .4rem; }
+  .vid {
+    display: flex; align-items: center; gap: .5rem; text-decoration: none;
+    background: #1a1a1a; border: 1px solid #333; border-radius: 8px;
+    padding: .5rem .6rem; color: #f2f2f2; font-size: .8rem;
+  }
+  .vid:hover { background: #232323; border-color: #c4302b; }
+  .vid .yt {
+    flex-shrink: 0; width: 1.6rem; height: 1.1rem; background: #c4302b; border-radius: 4px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .vid .yt::after { content: ""; border-left: .5rem solid #fff;
+    border-top: .32rem solid transparent; border-bottom: .32rem solid transparent; margin-left: .12rem; }
+  .vid .vt { display: flex; flex-direction: column; line-height: 1.3; min-width: 0; }
+  .vid .vt b { font-size: .8rem; }
+  .vid .vt span { font-size: .68rem; color: #9a9a9a;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .no-vid { font-size: .76rem; color: #6a6a6a; margin-top: .8rem; font-style: italic; }
+  .src { font-size: .64rem; color: #5a5a5a; margin-top: 1rem; }
+  .src a { color: #7a7a7a; }
+  .empty { font-size: .82rem; color: #6a6a6a; padding: .5rem 0; line-height: 1.5; }
+
+  .footer { border-top: 1px solid #242424; padding: .5rem 1rem .6rem; }
+  .ctrl { display: flex; align-items: center; gap: .7rem; }
   button {
     background: #1d1d1d; color: #f2f2f2; border: 1px solid #3a3a3a; border-radius: 6px;
-    padding: 7px 16px; cursor: pointer; font-size: 13px; min-width: 74px;
+    padding: .35rem .8rem; cursor: pointer; font-size: .82rem; min-width: 4.6rem;
   }
   button:hover { background: #292929; }
-  input[type=range] { flex: 1; accent-color: #e6c35c; height: 22px; cursor: pointer; }
-  .count { font-size: 13px; color: #b9b9b9; min-width: 132px; font-variant-numeric: tabular-nums; }
-  .count b { color: #e6c35c; font-size: 15px; }
+  input[type=range] { flex: 1; accent-color: #e6c35c; height: 1.4rem; cursor: pointer; }
+  .count { font-size: .82rem; color: #b9b9b9; min-width: 9rem; font-variant-numeric: tabular-nums; }
+  .count b { color: #e6c35c; font-size: .95rem; }
 </style>
 </head>
 <body>
@@ -309,6 +432,10 @@ HTML = r"""<!doctype html>
     <aside class="sidebar">
       <h2>Results</h2>
       <div class="results" id="results"></div>
+    </aside>
+    <aside class="details">
+      <h2>Match</h2>
+      <div class="detail-body" id="details"></div>
     </aside>
   </div>
   <div class="footer">
@@ -516,12 +643,78 @@ function buildResults() {
   });
   document.getElementById('results').innerHTML = html;
   document.querySelectorAll('.row').forEach(r =>
-    r.addEventListener('click', () => setN(+r.dataset.i + 1)));
+    r.addEventListener('click', () => select(+r.dataset.i)));
+}
+
+// Right-most column: info + video links for the selected match.
+function vidLink(v, label) {
+  return `<a class="vid" href="${v.url}" target="_blank" rel="noopener">
+      <span class="yt"></span>
+      <span class="vt"><b>${label}</b><span>${v.title || v.url}</span></span></a>`;
+}
+
+function renderDetails(i) {
+  const el = document.getElementById('details');
+  if (i < 0 || i >= D.matches.length) {
+    el.innerHTML = `<div class="empty">Move the slider, or pick a match on the
+      left, to see the score, venue and highlights here.</div>`;
+    return;
+  }
+  const m = D.matches[i];
+  const sc = /^(\d+)-(\d+)/.exec(m.score);      // leading FT/ET scoreline
+  const ga = sc ? sc[1] : '', gb = sc ? sc[2] : '';
+  const team = (c, g) => `<div class="d-team ${m.winner === c ? 'win' : 'lose'}">
+      <img src="${D.flags[c]}" alt=""><span class="nm">${NAME[c]}</span>
+      <span class="gl">${g}</span></div>`;
+
+  // who scored, and when
+  const goalRow = g => `<div class="goal">
+      <img src="${D.flags[g.code]}" alt="">
+      <span class="min">${g.min}'</span>
+      <span class="nm2">${g.name}${g.og ? ' <span class="tag">(o.g.)</span>'
+        : g.pen ? ' <span class="tag">(pen.)</span>' : ''}</span></div>`;
+  const goalsBlock = m.goals.length
+    ? `<div class="goals">${m.goals.map(goalRow).join('')}</div>`
+    : `<div class="no-goals">No goals in normal or extra time.</div>`;
+
+  // link out to the highlights on YouTube (FOX Sports disables embedding)
+  const v = m.video || {};
+  const links = [];
+  if (v.hl) links.push(vidLink(v.hl, 'Highlights'));
+  if (v.ext) links.push(vidLink(v.ext, 'Extended highlights'));
+  const vidBlock = links.length
+    ? `<div class="vids">${links.join('')}</div>`
+    : `<div class="no-vid">No highlights video available for this match.</div>`;
+
+  const meta = [`<b>Date:</b> ${m.date}`];
+  if (m.ground) meta.push(`<b>Stadium:</b> ${m.ground}`);
+  el.innerHTML = `
+    <div class="d-round">${m.round}</div>
+    ${team(m.a, ga)}
+    <div class="d-vs">vs</div>
+    ${team(m.b, gb)}
+    <div class="d-meta">${meta.join('<br>')}</div>
+    <div class="sec-h">Goals</div>
+    ${goalsBlock}
+    <div class="sec-h">Highlights</div>
+    ${vidBlock}
+    ${D.sourceChannel ? `<div class="src">Video via
+      <a href="${D.sourceChannel}" target="_blank" rel="noopener"
+      >${D.sourceChannel.replace('https://www.youtube.com/', '')}</a></div>` : ''}`;
 }
 
 const stage = document.getElementById('stage');
 const slider = document.getElementById('slider');
 const rows = () => document.querySelectorAll('.row');
+let selected = -1;
+
+// Select a match for the details column (independent of the slider position),
+// so an earlier game's highlights can be pulled up without rewinding the graph.
+function select(i) {
+  selected = i;
+  rows().forEach((r, k) => r.classList.toggle('selected', k === i));
+  renderDetails(i);
+}
 
 function setN(n) {
   n = Math.max(0, Math.min(D.matches.length, n));
@@ -534,6 +727,7 @@ function setN(n) {
   });
   const cur = document.querySelector('.row.latest');
   if (cur) cur.scrollIntoView({ block: 'nearest' });
+  select(n - 1);          // details follow the most recently played match
 }
 
 stage.innerHTML = staticSvg();
